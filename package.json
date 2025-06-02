@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:cpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json",
+    "build:gpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

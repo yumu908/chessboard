@@ -34,7 +34,7 @@ tokio = { version = "1.44", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-ort = { version = "=2.0.0-rc.9", features = ["cuda", "directml", "load-dynamic"] }
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["ndarray", "load-dynamic"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ort = { version = "=2.0.0-rc.9", features = ["coreml"] }
@@ -48,6 +48,11 @@ incremental = true
 [features]
 default = []
 rotate = []
+gpu = [
+    "ort/copy-dylibs",
+    "ort/cuda",
+    "ort/directml"
+]
 
 [profile.release]
 codegen-units = 1

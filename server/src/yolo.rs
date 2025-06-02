@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use ndarray::s;
 use ndarray::Array;
 use ort::inputs;
+use ort::session::builder::GraphOptimizationLevel;
 use xcap::image::imageops::FilterType;
 use xcap::image::DynamicImage;
 use xcap::image::GenericImageView;
@@ -27,11 +28,15 @@ const MODEL_BYTES: &[u8] = include_bytes!("../../libs/rotate.onnx");
 
 pub fn session() -> &'static ort::session::Session {
     SESSION.get_or_init(|| {
-        #[cfg(target_os = "windows")]
+
+        #[cfg(all(target_os = "windows",feature = "gpu"))]
         let eps = [
             ort::execution_providers::CUDAExecutionProvider::default().build(),
             ort::execution_providers::DirectMLExecutionProvider::default().build(),
         ];
+
+        #[cfg(all(target_os = "windows",not(feature = "gpu")))]
+        let eps = [];
 
         #[cfg(target_os = "macos")]
         let eps = [ort::execution_providers::CoreMLExecutionProvider::default().build()];
@@ -39,9 +44,11 @@ pub fn session() -> &'static ort::session::Session {
         #[cfg(target_os = "linux")]
         let eps = [ort::execution_providers::CUDAExecutionProvider::default().build()];
 
-        ort::init().with_execution_providers(eps).commit().unwrap();
+        ort::init().with_execution_providers(eps).commit().expect("init session failed with execution providers");
 
-        ort::session::Session::builder().unwrap().commit_from_memory(MODEL_BYTES).unwrap()
+        ort::session::Session::builder().expect("init session failed with builder")
+        .with_optimization_level(GraphOptimizationLevel::Level3).expect("init session failed with optimization level")
+        .commit_from_memory(MODEL_BYTES).expect("init session failed with load model")
     })
 }
 
