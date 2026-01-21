@@ -397,13 +397,12 @@ pub async fn start_listen(app: AppHandle, target: Window) -> Result<(), String> 
 pub fn stop_listen() {
     info!("stop listen");
     let shared_state = SHARED_STATE.get().unwrap();
-    if let Ok(mut state) = shared_state.listen_thread.lock() {
-        if let Some(listen_thread) = state.take() {
+    if let Ok(mut state) = shared_state.listen_thread.lock()
+        && let Some(listen_thread) = state.take() {
             // 释放锁，停止后台线程
             debug!("释放锁，停止后台线程");
             drop(state);
             listen_thread.join().unwrap();
         }
-    }
     debug!("stoped");
 }
