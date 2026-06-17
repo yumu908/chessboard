@@ -57,6 +57,48 @@ B站：[https://www.bilibili.com/video/BV1TQVBzuE7C?t=3.4](https://www.bilibili.
 4. 右侧面板实时展示最佳走法与评分
 5. 可在“设置”中自由调整分析深度、线程数及开局库参数
 
+## 💻 CPU 与 GPU 计算模式
+
+在本项目中，是进行 CPU 计算 还是 GPU 计算，主要是通过以下两点来进行区分和控制的：
+
+### 1. 编译时的 Feature 选项 (Cargo Feature)
+在后端的配置文件 `server/Cargo.toml` 中，定义了名为 `gpu` 的 feature 开关：
+
+```toml
+[features]
+default = []
+gpu = [
+    "ort/copy-dylibs",
+    "ort/cuda",
+    "ort/directml"
+]
+```
+
+在代码 `server/src/yolo.rs` 中，通过条件编译来决定运行时加载的 ONNX Runtime 执行提供商 (Execution Providers)：
+
+```rust
+// 如果启用了 gpu 特征，则注册 CUDA (英伟达显卡) 和 DirectML (通用显卡加速接口)
+#[cfg(all(target_os = "windows", feature = "gpu"))]
+let eps = [
+    ort::execution_providers::CUDAExecutionProvider::default().build(),
+    ort::execution_providers::DirectMLExecutionProvider::default().build(),
+];
+
+// 如果未启用 gpu 特征（即默认 CPU 模式），执行提供商列表为空，ONNX Runtime 默认使用 CPU 计算
+#[cfg(all(target_os = "windows", not(feature = "gpu")))]
+let eps = [];
+```
+
+### 2. 启动/打包指令的参数
+在项目根目录的 `package.json` 中，提供了不同的启动和打包命令：
+
+* **CPU 运行/编译**：
+  * 开发环境调试（默认 CPU）：`pnpm tauri dev`（不带 `--features gpu` 标志，因此走 CPU 计算）。
+  * 打包 CPU 版：`pnpm build:cpu`（内部调用不带 feature 参数的构建）。
+* **GPU 运行/编译**（需本地有 NVIDIA 显卡及 CUDA 环境，或支持 DirectML 的显卡）：
+  * 开发调试（启用 GPU）：`pnpm tauri dev --features gpu`
+  * 打包 GPU 版：`pnpm build:gpu`（内部会执行 `tauri build --features gpu`，启用 GPU 计算支持并打包相关显卡驱动 DLL 文件）。
+
 ## 📸 应用截图
 
 ![启动界面](./docs/starup.png)  
