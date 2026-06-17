@@ -20,6 +20,7 @@ pub struct Config {
     pub loglevel: String,
     pub timer_interval: u64,
     pub confirm_interval: u64,
+    pub autoplay: bool,
 
     pub engine: EngineConfig,
 }
@@ -31,6 +32,7 @@ impl Default for Config {
             loglevel: "INFO".to_string(),
             timer_interval: 100,
             confirm_interval: 200,
+            autoplay: false,
             engine: Default::default(),
         }
     }
@@ -134,4 +136,18 @@ pub async fn set_chessdb(enabled: bool, timeout: Option<u64>) {
     config.engine.chessdb_timeout = timeout;
     config.save();
     debug!("set_chessdb: {} -> {}", enabled, timeout);
+}
+
+#[tauri::command]
+pub async fn get_autoplay() -> bool {
+    SHARED_STATE.get().unwrap().config.read().unwrap().autoplay
+}
+
+#[tauri::command]
+pub async fn set_autoplay(enabled: bool) {
+    let state = SHARED_STATE.get().unwrap();
+    let mut config = state.config.write().unwrap();
+    config.autoplay = enabled;
+    config.save();
+    debug!("set_autoplay: {}", enabled);
 }

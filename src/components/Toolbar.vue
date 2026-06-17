@@ -63,10 +63,17 @@ const config = ref<EngineConfig>({
 
 const showEngineConfig = ref(false);
 const isEngineRunning = ref(false);
+const autoplay = ref(false);
 
 onMounted(async () => {
     await getEngineConfig();
+    autoplay.value = await invoke("get_autoplay");
 });
+
+async function toggleAutoplay() {
+    autoplay.value = !autoplay.value;
+    await invoke("set_autoplay", { enabled: autoplay.value });
+}
 
 async function copy_fen() {}
 
@@ -291,6 +298,20 @@ async function toggleEngine() {
                             >
                         </template>
                         引擎配置
+                    </n-tooltip>
+
+                    <n-tooltip trigger="hover" placement="bottom">
+                        <template #trigger>
+                            <n-button
+                                circle
+                                size="small"
+                                :type="autoplay ? 'warning' : 'default'"
+                                @click="toggleAutoplay"
+                            >
+                                自
+                            </n-button>
+                        </template>
+                        {{ autoplay ? "关闭自动下棋" : "开启自动下棋" }}
                     </n-tooltip>
 
                     <n-divider vertical />

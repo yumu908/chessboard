@@ -21,6 +21,35 @@ use crate::yolo::IMAGE_HEIGHT;
 use crate::yolo::IMAGE_WIDTH;
 use crate::SHARED_STATE;
 
+#[cfg(target_os = "windows")]
+mod win32 {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct RECT {
+        pub left: i32,
+        pub top: i32,
+        pub right: i32,
+        pub bottom: i32,
+    }
+
+    #[repr(C)]
+    pub struct HWND__(c_void);
+    pub type HWND = *mut HWND__;
+
+    unsafe extern "system" {
+        pub fn GetWindowRect(hwnd: HWND, lpRect: *mut RECT) -> i32;
+        pub fn SetForegroundWindow(hwnd: HWND) -> i32;
+        pub fn SetCursorPos(x: i32, y: i32) -> i32;
+        pub fn mouse_event(dw_flags: u32, dx: u32, dy: u32, dw_data: u32, dw_extra_info: usize);
+        pub fn IsWindow(hwnd: HWND) -> i32;
+    }
+
+    pub const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+    pub const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+}
+
 // 棋盘分析结果
 struct BoardAnalysisResult {
     expect_move: chess::Changed,
@@ -63,6 +92,87 @@ impl AnalysisContext {
         }
     }
 
+    fn execute_move(&self, pv: &str, camp: &chess::Camp) {
+        #[cfg(target_os = "windows")]
+        {
+            if pv.len() < 4 {
+                return;
+            }
+            let mut cs = pv.chars();
+            let from_x = cs.next().unwrap() as usize - 97; // 'a' is 97
+            let from_y = 57 - cs.next().unwrap() as usize; // '9' is 57
+            let to_x = cs.next().unwrap() as usize - 97;
+            let to_y = 57 - cs.next().unwrap() as usize;
+
+            // 根据阵营（是否黑方）做坐标映射，还原回截图中的实际行列
+            let (raw_from_x, raw_from_y) = if camp.is_black() {
+                (8 - from_x, 9 - from_y)
+            } else {
+                (from_x, from_y)
+            };
+
+            let (raw_to_x, raw_to_y) = if camp.is_black() {
+                (8 - to_x, 9 - to_y)
+            } else {
+                (to_x, to_y)
+            };
+
+            let w_f = self.window.w as f32;
+            let h_f = self.window.h as f32;
+            if w_f <= 0.0 || h_f <= 0.0 {
+                return;
+            }
+
+            // 计算相对窗口的坐标
+            let from_cx = self.window.x as f32 + (raw_from_x as f32 + 0.5) * (w_f / 9.0);
+            let from_cy = self.window.y as f32 + (raw_from_y as f32 + 0.5) * (h_f / 10.0);
+
+            let to_cx = self.window.x as f32 + (raw_to_x as f32 + 0.5) * (w_f / 9.0);
+            let to_cy = self.window.y as f32 + (raw_to_y as f32 + 0.5) * (h_f / 10.0);
+
+            let hwnd_val = self.window.id();
+            let hwnd = hwnd_val as usize as win32::HWND;
+            let mut rect = win32::RECT::default();
+            unsafe {
+                if win32::IsWindow(hwnd) != 0 {
+                    win32::GetWindowRect(hwnd, &mut rect);
+                    
+                    let screen_from_x = rect.left + from_cx as i32;
+                    let screen_from_y = rect.top + from_cy as i32;
+                    let screen_to_x = rect.left + to_cx as i32;
+                    let screen_to_y = rect.top + to_cy as i32;
+
+                    info!("自动下棋执行: {} -> {} (屏幕位置: {},{} -> {},{})", 
+                          &pv[..2], &pv[2..], screen_from_x, screen_from_y, screen_to_x, screen_to_y);
+
+                    // 激活窗口
+                    win32::SetForegroundWindow(hwnd);
+                    thread::sleep(Duration::from_millis(150));
+
+                    // 点击起点
+                    win32::SetCursorPos(screen_from_x, screen_from_y);
+                    thread::sleep(Duration::from_millis(150));
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    thread::sleep(Duration::from_millis(100));
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+
+                    thread::sleep(Duration::from_millis(300));
+
+                    // 点击终点
+                    win32::SetCursorPos(screen_to_x, screen_to_y);
+                    thread::sleep(Duration::from_millis(150));
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    thread::sleep(Duration::from_millis(100));
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            info!("当前平台不支持自动下棋着法模拟: {}", pv);
+        }
+    }
+
     // 检查是否需要终止分析线程
     fn should_stop(&self) -> bool {
         let state = SHARED_STATE.get().unwrap();
@@ -95,6 +205,15 @@ impl AnalysisContext {
         result.as_ref()?;
 
         let (expect_move, expect_board) = analyse(&self.app, result.unwrap(), board);
+
+        // 如果开启了自动下棋，则自动执行该着法
+        if config.autoplay {
+            // 稍作延迟以获得更好的稳定性和观感
+            thread::sleep(Duration::from_millis(600));
+            let pv = expect_move.from.clone() + &expect_move.to;
+            self.execute_move(&pv, camp);
+        }
+
         Some(BoardAnalysisResult { expect_move, expect_board })
     }
 

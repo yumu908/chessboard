@@ -39,10 +39,10 @@ pub async fn list_windows() -> Result<Vec<Window>, String> {
 pub struct ListenWindow {
     window: xcap::Window,
 
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
 impl ListenWindow {
@@ -60,7 +60,13 @@ impl ListenWindow {
     pub fn capture(&self) -> image::ImageBuffer<image::Rgba<u8>, Vec<u8>> {
         let mut pic = self.window.capture_image().unwrap();
         if self.w > 0 {
-            pic = pic.sub_image(self.x, self.y, self.w, self.h).to_image();
+            let x = self.x.min(pic.width());
+            let y = self.y.min(pic.height());
+            let w = self.w.min(pic.width() - x);
+            let h = self.h.min(pic.height() - y);
+            if w > 0 && h > 0 {
+                pic = pic.sub_image(x, y, w, h).to_image();
+            }
         }
         pic
     }
@@ -70,5 +76,9 @@ impl ListenWindow {
         self.y = y;
         self.w = w;
         self.h = h;
+    }
+
+    pub fn id(&self) -> u32 {
+        self.window.id().unwrap()
     }
 }

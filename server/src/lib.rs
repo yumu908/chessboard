@@ -25,6 +25,28 @@ struct SharedState {
 
 static SHARED_STATE: OnceLock<SharedState> = OnceLock::new();
 
+fn get_lib_path<R: tauri::Runtime, M: tauri::Manager<R>>(manager: &M) -> std::path::PathBuf {
+    let mut lib_path = manager.path().resolve("../libs/pikafish", tauri::path::BaseDirectory::Resource).unwrap();
+    if !lib_path.exists() {
+        if let Ok(exe_path) = std::env::current_exe() {
+            let mut path = exe_path.clone();
+            while path.pop() {
+                let candidate = path.join("libs/pikafish");
+                if candidate.exists() {
+                    lib_path = candidate;
+                    break;
+                }
+                let candidate_parent = path.join("../libs/pikafish");
+                if candidate_parent.exists() {
+                    lib_path = candidate_parent;
+                    break;
+                }
+            }
+        }
+    }
+    lib_path
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -33,7 +55,7 @@ pub fn run() {
 
             let _ = SHARED_STATE.get_or_init(|| {
                 let config = config::Config::load(&app.path().config_dir().unwrap());
-                let lib_path = app.path().resolve("../libs/pikafish", tauri::path::BaseDirectory::Resource).unwrap();
+                let lib_path = get_lib_path(app);
                 let mut engine = engine::Engine::new(&lib_path);
                 engine.set_show_wdl(config.engine.show_wdl);
                 engine.set_hash(config.engine.hash);
@@ -60,6 +82,8 @@ pub fn run() {
             config::set_engine_threads,
             config::set_engine_hash,
             config::set_chessdb,
+            config::get_autoplay,
+            config::set_autoplay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -67,7 +91,7 @@ pub fn run() {
 
 #[tauri::command]
 fn reload_engine(app: tauri::AppHandle) {
-    let lib_path = app.path().resolve("../libs/pikafish", tauri::path::BaseDirectory::Resource).unwrap();
+    let lib_path = get_lib_path(&app);
     let state = SHARED_STATE.get().unwrap();
     let engine_config = state.config.read().unwrap().engine;
     state.engine.lock().unwrap().reload(&lib_path, &engine_config);
