@@ -47,11 +47,68 @@ fn get_lib_path<R: tauri::Runtime, M: tauri::Manager<R>>(manager: &M) -> std::pa
     lib_path
 }
 
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SetDllDirectoryW(lpPathName: *const u16) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn init_dll_directory<R: tauri::Runtime, M: tauri::Manager<R>>(manager: &M) {
+    if let Ok(resource_dir) = manager.path().resource_dir() {
+        let dll_path = resource_dir.join("onnxruntime.dll");
+        if dll_path.exists() {
+            set_dll_dir(&resource_dir);
+            return;
+        }
+    }
+    
+    if let Ok(exe_path) = std::env::current_exe() {
+        let mut path = exe_path.clone();
+        while path.pop() {
+            let candidate = path.join("libs/windows-gpu");
+            if candidate.exists() {
+                set_dll_dir(&candidate);
+                return;
+            }
+            let candidate_parent = path.join("../libs/windows-gpu");
+            if candidate_parent.exists() {
+                set_dll_dir(&candidate_parent);
+                return;
+            }
+            let candidate_cpu = path.join("libs/windows-cpu");
+            if candidate_cpu.exists() {
+                set_dll_dir(&candidate_cpu);
+                return;
+            }
+            let candidate_cpu_parent = path.join("../libs/windows-cpu");
+            if candidate_cpu_parent.exists() {
+                set_dll_dir(&candidate_cpu_parent);
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_dll_dir(path: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    unsafe {
+        let res = SetDllDirectoryW(wide.as_ptr());
+        tracing::info!("SetDllDirectoryW to {} returned {}", path.display(), res);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             logger::init_tracer(tracing::Level::DEBUG, &app.path().app_data_dir().unwrap());
+
+            #[cfg(target_os = "windows")]
+            init_dll_directory(app);
 
             let _ = SHARED_STATE.get_or_init(|| {
                 let config = config::Config::load(&app.path().config_dir().unwrap());
