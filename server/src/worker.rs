@@ -393,7 +393,7 @@ impl AnalysisContext {
         }
     }
 
-    // 棋盘识别无效或被遮挡时，每隔 6 秒自动点击一次屏幕x正中间、y三分之二处，以驱散可能的干扰弹窗
+    // 棋盘识别无效或被遮挡时，每隔 6 秒自动点击一次屏幕x正中间、y八分之七处，以驱散可能的干扰弹窗
     fn handle_invalid_board_click(&mut self) {
         let now = std::time::Instant::now();
         let should_click = match self.last_invalid_click_time {
@@ -403,9 +403,9 @@ impl AnalysisContext {
         if should_click {
             let (width, height) = self.window.full_size();
             let click_x = width / 2;
-            let click_y = height * 2 / 3;
+            let click_y = height * 7 / 8;
             if click_x > 0 && click_y > 0 {
-                info!("[自愈点击] 棋盘识别无效/被遮挡，尝试点击屏幕中下部（x中间, y 2/3处）以清除弹窗 ({}, {})", click_x, click_y);
+                info!("[自愈点击] 棋盘识别无效/被遮挡，尝试点击屏幕底部（x中间, y 7/8处）以清除弹窗 ({}, {})", click_x, click_y);
                 self.click_screen_pos(click_x, click_y);
                 self.last_invalid_click_time = Some(now);
             }
