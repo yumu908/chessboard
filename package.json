@@ -8,10 +8,11 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "build:cpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json",
-    "build:gpu": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu",
-    "build:cpu:rotate": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.cpu.conf.json --features rotate",
-    "build:gpu:rotate": "vue-tsc --noEmit && vite build && tauri build --config server/tauri.windows.gpu.conf.json --features gpu,rotate"
+    "obfuscate": "node scripts/obfuscate.js",
+    "build:cpu": "tauri build --config server/tauri.windows.cpu.conf.json",
+    "build:gpu": "tauri build --config server/tauri.windows.gpu.conf.json --features gpu",
+    "build:cpu:rotate": "tauri build --config server/tauri.windows.cpu.conf.json --features rotate",
+    "build:gpu:rotate": "tauri build --config server/tauri.windows.gpu.conf.json --features gpu,rotate"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.3",
+    "javascript-obfuscator": "^5.4.3",
     "naive-ui": "^2.41.0",
     "typescript": "~5.6.2",
     "vite": ">=6.2.7",
