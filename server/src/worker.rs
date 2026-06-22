@@ -35,6 +35,13 @@ mod win32 {
     }
 
     #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct POINT {
+        pub x: i32,
+        pub y: i32,
+    }
+
+    #[repr(C)]
     pub struct HWND__(c_void);
     pub type HWND = *mut HWND__;
 
@@ -42,6 +49,7 @@ mod win32 {
         pub fn GetWindowRect(hwnd: HWND, lpRect: *mut RECT) -> i32;
         pub fn SetForegroundWindow(hwnd: HWND) -> i32;
         pub fn SetCursorPos(x: i32, y: i32) -> i32;
+        pub fn GetCursorPos(lpPoint: *mut POINT) -> i32;
         pub fn mouse_event(dw_flags: u32, dx: u32, dy: u32, dw_data: u32, dw_extra_info: usize);
         pub fn IsWindow(hwnd: HWND) -> i32;
     }
@@ -74,6 +82,13 @@ struct AnalysisContext {
     expect_move: chess::Changed,
     expect_board: [[char; 9]; 10],
     invalid_change_count: usize,
+    has_pending_click: bool,
+    last_action_time: Option<std::time::Instant>,
+    last_auto_match_time: Option<std::time::Instant>,
+    last_recalibrate_time: Option<std::time::Instant>,
+    last_board_change_time: std::time::Instant,
+    last_invalid_click_time: Option<std::time::Instant>,
+    current_camp: chess::Camp,
 }
 
 unsafe impl Send for AnalysisContext {}
@@ -89,6 +104,13 @@ impl AnalysisContext {
             expect_move: chess::Changed::default(),
             expect_board: [[' '; 9]; 10],
             invalid_change_count: 0,
+            has_pending_click: false,
+            last_action_time: None,
+            last_auto_match_time: None,
+            last_recalibrate_time: None,
+            last_board_change_time: std::time::Instant::now(),
+            last_invalid_click_time: None,
+            current_camp: chess::Camp::None,
         }
     }
 
@@ -145,25 +167,37 @@ impl AnalysisContext {
                     info!("自动下棋执行: {} -> {} (屏幕位置: {},{} -> {},{})", 
                           &pv[..2], &pv[2..], screen_from_x, screen_from_y, screen_to_x, screen_to_y);
 
+                    // 记录原先的鼠标位置，防止影响用户操作
+                    let mut original_pos = win32::POINT::default();
+                    win32::GetCursorPos(&mut original_pos);
+
                     // 激活窗口
                     win32::SetForegroundWindow(hwnd);
                     thread::sleep(Duration::from_millis(150));
 
-                    // 点击起点
+                    // 点击起点：在此期间强制把鼠标坐标定位到起点
                     win32::SetCursorPos(screen_from_x, screen_from_y);
                     thread::sleep(Duration::from_millis(150));
+                    win32::SetCursorPos(screen_from_x, screen_from_y);
                     win32::mouse_event(win32::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                     thread::sleep(Duration::from_millis(100));
+                    win32::SetCursorPos(screen_from_x, screen_from_y);
                     win32::mouse_event(win32::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 
                     thread::sleep(Duration::from_millis(300));
 
-                    // 点击终点
+                    // 点击终点：在此期间强制把鼠标坐标定位到终点
                     win32::SetCursorPos(screen_to_x, screen_to_y);
                     thread::sleep(Duration::from_millis(150));
+                    win32::SetCursorPos(screen_to_x, screen_to_y);
                     win32::mouse_event(win32::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                     thread::sleep(Duration::from_millis(100));
+                    win32::SetCursorPos(screen_to_x, screen_to_y);
                     win32::mouse_event(win32::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+
+                    // 恢复鼠标指针到用户原本的位置
+                    thread::sleep(Duration::from_millis(50));
+                    win32::SetCursorPos(original_pos.x, original_pos.y);
                 }
             }
         }
@@ -171,6 +205,105 @@ impl AnalysisContext {
         {
             info!("当前平台不支持自动下棋着法模拟: {}", pv);
         }
+    }
+
+    fn click_screen_pos(&self, client_x: u32, client_y: u32) {
+        #[cfg(target_os = "windows")]
+        {
+            let hwnd_val = self.window.id();
+            let hwnd = hwnd_val as usize as win32::HWND;
+            let mut rect = win32::RECT::default();
+            unsafe {
+                if win32::IsWindow(hwnd) != 0 {
+                    win32::GetWindowRect(hwnd, &mut rect);
+                    
+                    let screen_x = rect.left + client_x as i32;
+                    let screen_y = rect.top + client_y as i32;
+
+                    // 记录原先的鼠标位置，防止影响用户操作
+                    let mut original_pos = win32::POINT::default();
+                    win32::GetCursorPos(&mut original_pos);
+
+                    // 激活窗口
+                    win32::SetForegroundWindow(hwnd);
+                    thread::sleep(Duration::from_millis(150));
+
+                    // 点击该位置
+                    win32::SetCursorPos(screen_x, screen_y);
+                    thread::sleep(Duration::from_millis(100));
+                    win32::SetCursorPos(screen_x, screen_y);
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    thread::sleep(Duration::from_millis(100));
+                    win32::SetCursorPos(screen_x, screen_y);
+                    win32::mouse_event(win32::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+
+                    // 恢复鼠标位置
+                    thread::sleep(Duration::from_millis(50));
+                    win32::SetCursorPos(original_pos.x, original_pos.y);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            info!("当前平台不支持窗口坐标模拟点击: {}, {}", client_x, client_y);
+        }
+    }
+
+    // 尝试检测并点击“再来一局”按钮
+    fn try_auto_match(&mut self, current_state: &mut ChessboardState) -> bool {
+        let auto_match = SHARED_STATE.get().unwrap().config.read().unwrap().auto_match;
+        if !auto_match {
+            return false;
+        }
+
+        let now = std::time::Instant::now();
+        let should_check = match self.last_auto_match_time {
+            None => true,
+            Some(last_time) => now.duration_since(last_time) > Duration::from_secs(5),
+        };
+
+        if should_check {
+            let image = self.window.capture_full();
+            if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
+                info!("[自动匹配] 检测到“再来一局”按钮，执行自动点击！");
+                self.click_screen_pos(btn_x, btn_y);
+                self.last_auto_match_time = Some(now);
+                
+                // 游戏已结束，清除挂起点击，防止它继续重试刚才的着法
+                self.has_pending_click = false;
+                self.last_action_time = None;
+                
+                *current_state = ChessboardState::Initial;
+                return true;
+            }
+        }
+        false
+    }
+
+    // 动态校准/重新定位棋盘边界，以应对模拟器移动、缩放等变化
+    fn recalibrate_board_bound(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if let Some(last_time) = self.last_recalibrate_time {
+            if now.duration_since(last_time) < Duration::from_secs(2) {
+                return false;
+            }
+        }
+        self.last_recalibrate_time = Some(now);
+
+        let image = self.window.capture_full();
+        let _ = image.save("d:\\PythonSpace\\chessboard\\artifacts\\recalibrate_capture.png");
+        let image_h = image.height();
+        let image_w = image.width();
+        
+        if let Ok(detections) = predict(image) {
+            info!("动态校准检测到的框: {:?}", detections);
+            if let Ok((x, y, w, h)) = common::detections_bound(image_w, image_h, &detections) {
+                info!("动态重新校准棋盘边界成功: x={}, y={}, w={}, h={}", x, y, w, h);
+                self.window.set_sub_bound(x, y, w, h);
+                return true;
+            }
+        }
+        false
     }
 
     // 检查是否需要终止分析线程
@@ -182,14 +315,16 @@ impl AnalysisContext {
     // 获取棋盘图像并分析
     fn capture_and_analyze_board(&self) -> Option<(chess::Camp, [[char; 9]; 10])> {
         let image = self.window.capture();
-        get_board(image)
+        let require_board_outline = self.window.w == 0;
+        get_board(image, require_board_outline, &self.current_camp)
     }
 
     // 确认棋盘状态是否稳定
     fn confirm_board(&self, board: [[char; 9]; 10]) -> bool {
         thread::sleep(Duration::from_millis(100));
         let conf_image = self.window.capture();
-        if let Some((_, conf_board)) = get_board(conf_image) {
+        let require_board_outline = self.window.w == 0;
+        if let Some((_, conf_board)) = get_board(conf_image, require_board_outline, &self.current_camp) {
             return conf_board == board;
         }
         false
@@ -212,6 +347,8 @@ impl AnalysisContext {
             thread::sleep(Duration::from_millis(600));
             let pv = expect_move.from.clone() + &expect_move.to;
             self.execute_move(&pv, camp);
+            self.has_pending_click = true;
+            self.last_action_time = Some(std::time::Instant::now());
         }
 
         Some(BoardAnalysisResult { expect_move, expect_board })
@@ -245,16 +382,109 @@ impl AnalysisContext {
             ChessboardState::Initial
         }
     }
+
+    // 棋盘识别无效或被遮挡时，每隔 6 秒自动点击一次屏幕中心点，以驱散可能的干扰弹窗
+    fn handle_invalid_board_click(&mut self) {
+        let now = std::time::Instant::now();
+        let should_click = match self.last_invalid_click_time {
+            None => true,
+            Some(last_time) => now.duration_since(last_time) > Duration::from_secs(6),
+        };
+        if should_click {
+            let (width, height) = self.window.full_size();
+            let center_x = width / 2;
+            let center_y = height / 2;
+            if center_x > 0 && center_y > 0 {
+                info!("[自愈点击] 棋盘识别无效/被遮挡，尝试点击屏幕中心以清除弹窗 ({}, {})", center_x, center_y);
+                self.click_screen_pos(center_x, center_y);
+                self.last_invalid_click_time = Some(now);
+            }
+        }
+    }
 }
 
-pub fn get_board(image: ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<(chess::Camp, [[char; 9]; 10])> {
+pub fn get_board(
+    image: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    require_board_outline: bool,
+    tracked_camp: &chess::Camp,
+) -> Option<(chess::Camp, [[char; 9]; 10])> {
     let data = predict(image).unwrap();
-    if let Ok((camp, mut board)) = common::detections_to_board(&data) {
+    if let Ok((mut camp, mut board)) = common::detections_to_board(&data, require_board_outline) {
+        if camp == chess::Camp::None && *tracked_camp != chess::Camp::None {
+            camp = tracked_camp.clone();
+        }
         chess::board_fix(&camp, &mut board);
         Some((camp, board))
     } else {
         None
     }
+}
+
+fn scan_green_button_in_region(
+    image: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+    _height: u32,
+    y_start: u32,
+    y_end: u32,
+) -> Option<(u32, u32)> {
+    let x_start = (width as f32 * 0.45) as u32;
+    let x_end = (width as f32 * 0.55) as u32;
+
+    let mut green_pixels = 0;
+    let mut sum_x = 0u64;
+    let mut sum_y = 0u64;
+
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            let pixel = image.get_pixel(x, y);
+            let r = pixel.0[0];
+            let g = pixel.0[1];
+            let b = pixel.0[2];
+
+            if g > 65 && g > r.saturating_add(26) && g > b.saturating_add(45) {
+                green_pixels += 1;
+                sum_x += x as u64;
+                sum_y += y as u64;
+            }
+        }
+    }
+
+    let total_scanned = (x_end - x_start) * (y_end - y_start);
+    let threshold = (total_scanned / 20).max(100);
+
+    if green_pixels > threshold {
+        let click_x = (sum_x / green_pixels as u64) as u32;
+        let click_y = (sum_y / green_pixels as u64) as u32;
+        Some((click_x, click_y))
+    } else {
+        None
+    }
+}
+
+pub fn check_play_again_btn(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<(u32, u32)> {
+    let width = image.width();
+    let height = image.height();
+    if width == 0 || height == 0 {
+        return None;
+    }
+    
+    // 区域一：中间偏下位置（弹窗的“确定”按钮），范围在 72% - 78%
+    let region_b_y_start = (height as f32 * 0.72) as u32;
+    let region_b_y_end = (height as f32 * 0.78) as u32;
+    if let Some(pos) = scan_green_button_in_region(image, width, height, region_b_y_start, region_b_y_end) {
+        info!("检测到弹窗的“确定”按钮！");
+        return Some(pos);
+    }
+
+    // 区域二：底部位置（“再来一局”按钮），范围在 89% - 93%
+    let region_a_y_start = (height as f32 * 0.89) as u32;
+    let region_a_y_end = (height as f32 * 0.93) as u32;
+    if let Some(pos) = scan_green_button_in_region(image, width, height, region_a_y_start, region_a_y_end) {
+        info!("检测到“再来一局”按钮！");
+        return Some(pos);
+    }
+
+    None
 }
 
 pub fn analyse(app: &AppHandle, mut result: QueryResult, board: [[char; 9]; 10]) -> (chess::Changed, [[char; 9]; 10]) {
@@ -294,14 +524,127 @@ fn process_analysis_loop(mut context: AnalysisContext) {
         let interval = SHARED_STATE.get().unwrap().config.read().unwrap().timer_interval;
         thread::sleep(Duration::from_millis(interval));
 
+        // 1. 如果用户关闭了“自动下棋”，清除任何挂起的点击状态，立即停止自动点击棋子
+        let autoplay = SHARED_STATE.get().unwrap().config.read().unwrap().autoplay;
+        if !autoplay {
+            context.has_pending_click = false;
+            context.last_action_time = None;
+        }
+
+        // 2. 如果开启了自动匹配，且处于初始状态或长时间无动作（防止对局中误检测），每隔 6 秒进行一次例行“再来一局”检测
+        let auto_match = SHARED_STATE.get().unwrap().config.read().unwrap().auto_match;
+        if auto_match {
+            let now = std::time::Instant::now();
+            let should_check = match context.last_auto_match_time {
+                None => true,
+                Some(last_time) => now.duration_since(last_time) > Duration::from_secs(6),
+            };
+            
+            // 对局正在进行（当前非 Initial 状态且最近 12 秒内有棋盘变化），则跳过例行检测以防误触头像
+            let last_change_elapsed = context.last_board_change_time.elapsed() > Duration::from_secs(12);
+            let is_idle_or_initial = current_state == ChessboardState::Initial || last_change_elapsed;
+
+            if should_check && is_idle_or_initial {
+                let image = context.window.capture_full();
+                if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
+                    info!("[自动匹配] 例行检测中发现“再来一局”按钮，执行自动点击！");
+                    context.click_screen_pos(btn_x, btn_y);
+                    context.last_auto_match_time = Some(now);
+                    
+                    // 游戏已结束，清除下棋点击及重试计时器
+                    context.has_pending_click = false;
+                    context.last_action_time = None;
+                    
+                    current_state = ChessboardState::Initial;
+                    continue;
+                }
+                context.last_auto_match_time = Some(now); // 更新时间以开始下一个 6 秒冷却周期
+            }
+        }
+
+        if current_state == ChessboardState::Initial {
+            context.current_camp = chess::Camp::None;
+        }
+
         // 捕获并分析棋盘
-        let board_result = context.capture_and_analyze_board();
+        let mut board_result = context.capture_and_analyze_board();
         if board_result.is_none() {
+            // 棋盘未识别到，尝试自动校准边界并重试
+            if context.recalibrate_board_bound() {
+                board_result = context.capture_and_analyze_board();
+            }
+        }
+
+        if board_result.is_none() {
+            context.handle_invalid_board_click();
+            context.try_auto_match(&mut current_state);
             continue;
         }
 
-        let (camp, board) = board_result.unwrap();
+        let (mut camp, mut board) = board_result.unwrap();
+        if camp != chess::Camp::None {
+            context.current_camp = camp.clone();
+        }
         trace!("{:?} {:?}", camp, board);
+
+        // 如果棋盘被识别为无效棋盘（例如弹窗遮挡、尺寸或位置发生改变）
+        if !chess::board_check(board) {
+            // 尝试自动校准边界并重试
+            if context.recalibrate_board_bound() {
+                if let Some((new_camp, new_board)) = context.capture_and_analyze_board() {
+                    if chess::board_check(new_board) {
+                        camp = new_camp;
+                        board = new_board;
+                    }
+                }
+            }
+        }
+
+        // 如果依然是无效棋盘，再进行常规兜底处理
+        if !chess::board_check(board) {
+            let debug_fen = chess::board_fen(&camp, board);
+            debug!("棋盘识别无效: {}", debug_fen);
+            context.handle_invalid_board_click();
+            context.try_auto_match(&mut current_state);
+            continue;
+        }
+
+        // 如果棋盘发生改变，更新最后变化时间以避免对局期间误判“再来一局”
+        if board != context.last_board {
+            context.last_board_change_time = std::time::Instant::now();
+        }
+
+        // 检测自动下棋点击是否超时未生效，并在超时后重新发送点击事件以避免死锁
+        if context.has_pending_click {
+            if board == context.expect_board {
+                // 已生效，清除挂起状态
+                context.has_pending_click = false;
+                context.last_action_time = None;
+            } else if let Some(last_time) = context.last_action_time {
+                if last_time.elapsed() > Duration::from_secs(3) {
+                    // 如果开启了自动匹配，点击未生效很有可能是因为对局已经结束，棋子无法移动，
+                    // 此时我们在重试前先检测并点击“再来一局”
+                    let auto_match = SHARED_STATE.get().unwrap().config.read().unwrap().auto_match;
+                    if auto_match {
+                        let image = context.window.capture_full();
+                        if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
+                            info!("[自动下棋重试] 棋子未移动，但检测到“再来一局”按钮，停止重发着法，执行匹配点击！");
+                            context.click_screen_pos(btn_x, btn_y);
+                            context.last_auto_match_time = Some(std::time::Instant::now());
+                            context.has_pending_click = false;
+                            context.last_action_time = None;
+                            current_state = ChessboardState::Initial;
+                            continue;
+                        }
+                    }
+
+                    info!("自动下棋未检测到预期棋盘，尝试重新执行着法: {} -> {}", context.expect_move.from, context.expect_move.to);
+                    let pv = context.expect_move.from.clone() + &context.expect_move.to;
+                    context.execute_move(&pv, &camp);
+                    context.last_action_time = Some(std::time::Instant::now());
+                }
+            }
+        }
 
         // 根据不同状态处理棋盘
         current_state = match current_state {
@@ -403,6 +746,8 @@ fn process_analysis_loop(mut context: AnalysisContext) {
                 } else if board == context.expect_board {
                     // 符合预期棋盘，跳过分析
                     debug!("棋盘为预期棋盘，跳过分析");
+                    context.has_pending_click = false;
+                    context.last_action_time = None;
                     let expect_move = context.expect_move.clone();
                     let expect_board = context.expect_board;
                     context.last_board = expect_board;
@@ -420,11 +765,6 @@ fn process_analysis_loop(mut context: AnalysisContext) {
                         debug!("棋盘延迟确认失败");
                         let confirm_interval = SHARED_STATE.get().unwrap().config.read().unwrap().confirm_interval;
                         thread::sleep(Duration::from_millis(confirm_interval));
-                        current_state // 保持当前状态
-                    } else if !chess::board_check(board) {
-                        // 检测棋盘是否有效
-                        let debug_fen = chess::board_fen(&camp, board);
-                        debug!("棋盘识别无效: {}", debug_fen);
                         current_state // 保持当前状态
                     } else {
                         // 处理正常棋盘变化
@@ -484,19 +824,23 @@ pub async fn start_listen(app: AppHandle, target: Window) -> Result<(), String> 
     let mut window = ListenWindow::new(&target, IMAGE_WIDTH, IMAGE_HEIGHT).unwrap(); // 创建窗口实例
     let image = window.capture();
 
+    let _ = std::fs::create_dir_all("d:\\PythonSpace\\chessboard\\artifacts");
+    let _ = image.save("d:\\PythonSpace\\chessboard\\artifacts\\startup_capture.png");
+
     let image_h = image.height();
     let image_w = image.width();
 
     let detections = predict(image).unwrap();
+    info!("启动时检测到的框: {:?}", detections);
 
-    match common::detections_bound(image_w, image_h, &detections) {
-        Ok((x, y, w, h)) => {
-            window.set_sub_bound(x, y, w, h); // 设置窗口边界
+    let (x, y, w, h) = match common::detections_bound(image_w, image_h, &detections) {
+        Ok((x, y, w, h)) => (x, y, w, h),
+        Err(_) => {
+            info!("首次启动未识别到棋盘（可能被结算弹窗遮挡），使用窗口全屏作为默认边界，依靠后续的自动匹配与自愈机制校准");
+            (0, 0, image_w, image_h)
         }
-        Err(e) => {
-            return Err(e); // 未识别到棋盘
-        }
-    }
+    };
+    window.set_sub_bound(x, y, w, h); // 设置窗口边界
 
     // 创建分析上下文
     let context = AnalysisContext::new(app.clone(), window);

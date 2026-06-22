@@ -64,15 +64,22 @@ const config = ref<EngineConfig>({
 const showEngineConfig = ref(false);
 const isEngineRunning = ref(false);
 const autoplay = ref(false);
+const automatch = ref(false);
 
 onMounted(async () => {
     await getEngineConfig();
     autoplay.value = await invoke("get_autoplay");
+    automatch.value = await invoke("get_auto_match");
 });
 
 async function toggleAutoplay() {
     autoplay.value = !autoplay.value;
     await invoke("set_autoplay", { enabled: autoplay.value });
+}
+
+async function toggleAutomatch() {
+    automatch.value = !automatch.value;
+    await invoke("set_auto_match", { enabled: automatch.value });
 }
 
 async function copy_fen() {}
@@ -312,6 +319,20 @@ async function toggleEngine() {
                             </n-button>
                         </template>
                         {{ autoplay ? "关闭自动下棋" : "开启自动下棋" }}
+                    </n-tooltip>
+
+                    <n-tooltip trigger="hover" placement="bottom">
+                        <template #trigger>
+                            <n-button
+                                circle
+                                size="small"
+                                :type="automatch ? 'success' : 'default'"
+                                @click="toggleAutomatch"
+                            >
+                                连
+                            </n-button>
+                        </template>
+                        {{ automatch ? "关闭自动匹配" : "开启自动匹配" }}
                     </n-tooltip>
 
                     <n-divider vertical />

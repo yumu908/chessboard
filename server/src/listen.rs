@@ -71,6 +71,10 @@ impl ListenWindow {
         pic
     }
 
+    pub fn capture_full(&self) -> image::ImageBuffer<image::Rgba<u8>, Vec<u8>> {
+        self.window.capture_image().unwrap()
+    }
+
     pub fn set_sub_bound(&mut self, x: u32, y: u32, w: u32, h: u32) {
         self.x = x;
         self.y = y;
@@ -80,5 +84,9 @@ impl ListenWindow {
 
     pub fn id(&self) -> u32 {
         self.window.id().unwrap()
+    }
+
+    pub fn full_size(&self) -> (u32, u32) {
+        (self.window.width().unwrap(), self.window.height().unwrap())
     }
 }

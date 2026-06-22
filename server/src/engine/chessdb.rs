@@ -9,7 +9,10 @@ const AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 const SOURCE_CHESSDB: &str = "云库";
 pub async fn query(fen: &str, timeout: u64) -> QueryResult {
     let mut records = super::QueryResult::default();
-    let resp = reqwest::Client::new()
+    let resp = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
         .get(URL)
         .header("User-Agent", AGENT)
         .header("Referer", REFER)
@@ -20,7 +23,7 @@ pub async fn query(fen: &str, timeout: u64) -> QueryResult {
     match resp {
         Ok(resp) => {
             let text = resp.text().await.unwrap();
-            let text = text.strip_suffix('\0').unwrap();
+            let text = text.trim_end_matches('\0');
             match text {
                 "" | "unknown" => records.state = QueryState::NotResult,
                 "invalid board" | "checkmate" | "stalemate" => records.state = QueryState::InvalidBoard,

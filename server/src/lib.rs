@@ -84,6 +84,8 @@ pub fn run() {
             config::set_chessdb,
             config::get_autoplay,
             config::set_autoplay,
+            config::get_auto_match,
+            config::set_auto_match,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

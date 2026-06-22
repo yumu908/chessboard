@@ -15,7 +15,7 @@ static SESSION: OnceLock<ort::session::Session> = OnceLock::new();
 
 pub const IMAGE_WIDTH: usize = 640;
 pub const IMAGE_HEIGHT: usize = 640;
-const CONFIDENCE_THRESHOLD: f32 = 0.7;
+const CONFIDENCE_THRESHOLD: f32 = 0.5;
 const IOU_THRESHOLD: f32 = 0.5;
 const LABELS: [char; 15] = ['n', 'b', 'a', 'k', 'r', 'c', 'p', 'R', 'N', 'A', 'K', 'B', 'C', 'P', '0'];
 const LIMIT: [usize; 15] = [2, 2, 2, 1, 2, 2, 5, 2, 2, 2, 1, 2, 2, 5, 1];
@@ -64,6 +64,19 @@ pub fn predict(origin_img: ImageBuffer<Rgba<u8>, Vec<u8>>) -> ort::Result<Vec<De
     }
     let outputs = session().run(inputs!["images" => input.view()]?)?;
     let output = outputs["output"].try_extract_tensor::<f32>()?.view().t().slice(s![.., .., 0]).t().to_owned();
+
+    let mut max_board_conf = 0.0;
+    for row in output.rows() {
+        let (class_id, max_prob) =
+            (5..20).map(|idx| (idx - 5, row[idx])).max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap();
+        let conf = row[4] * max_prob;
+        if class_id == 14 && conf > max_board_conf {
+            max_board_conf = conf;
+        }
+    }
+    if max_board_conf > 0.0 {
+        tracing::info!("YOLO 识别棋盘边界 '0' 的最大置信度为: {}", max_board_conf);
+    }
 
     let mut detections = output
         .rows()

@@ -21,6 +21,7 @@ pub struct Config {
     pub timer_interval: u64,
     pub confirm_interval: u64,
     pub autoplay: bool,
+    pub auto_match: bool,
 
     pub engine: EngineConfig,
 }
@@ -33,6 +34,7 @@ impl Default for Config {
             timer_interval: 100,
             confirm_interval: 200,
             autoplay: false,
+            auto_match: false,
             engine: Default::default(),
         }
     }
@@ -104,7 +106,7 @@ pub async fn set_engine_depth(depth: usize) {
 pub async fn set_engine_time(time: f32) {
     let state = SHARED_STATE.get().unwrap();
     let mut config = state.config.write().unwrap();
-    config.engine.time = (time * 1000.0) as usize;
+    config.engine.time = time as usize;
     config.save();
     debug!("set_engine_time: {}", time);
 }
@@ -150,4 +152,18 @@ pub async fn set_autoplay(enabled: bool) {
     config.autoplay = enabled;
     config.save();
     debug!("set_autoplay: {}", enabled);
+}
+
+#[tauri::command]
+pub async fn get_auto_match() -> bool {
+    SHARED_STATE.get().unwrap().config.read().unwrap().auto_match
+}
+
+#[tauri::command]
+pub async fn set_auto_match(enabled: bool) {
+    let state = SHARED_STATE.get().unwrap();
+    let mut config = state.config.write().unwrap();
+    config.auto_match = enabled;
+    config.save();
+    debug!("set_auto_match: {}", enabled);
 }
