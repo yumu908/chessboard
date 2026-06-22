@@ -511,7 +511,9 @@ pub fn check_rank_up_back_btn(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<
     let y_start = (height as f32 * 0.90) as u32;
     let y_end = (height as f32 * 0.98) as u32;
 
-    let mut matched_pixels = 0;
+    let mut matched_arrow_pixels = 0;
+    let mut matched_blue_bg_pixels = 0;
+    let mut total_bg_pixels = 0;
     let mut sum_x = 0u64;
     let mut sum_y = 0u64;
 
@@ -526,18 +528,32 @@ pub fn check_rank_up_back_btn(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<
             let b = pixel.0[2];
 
             // 匹配金色返回箭头的颜色特征
-            if r > 115 && g > 105 && r > g.saturating_sub(10) && r > b.saturating_sub(15) && b < r.saturating_add(15) {
-                matched_pixels += 1;
+            let is_arrow = r > 115 && g > 105 && r > g.saturating_sub(10) && r > b.saturating_sub(15) && b < r.saturating_add(15);
+            if is_arrow {
+                matched_arrow_pixels += 1;
                 sum_x += x as u64;
                 sum_y += y as u64;
+            } else {
+                total_bg_pixels += 1;
+                // 匹配深蓝色背景特征
+                if b > r.saturating_add(40) && b > g.saturating_add(40) {
+                    matched_blue_bg_pixels += 1;
+                }
             }
         }
     }
 
-    // 如果匹配的金色像素数量足够（例如至少 200 个），则判定为检测到返回按钮
-    if matched_pixels > 200 {
-        let click_x = (sum_x / matched_pixels) as u32;
-        let click_y = (sum_y / matched_pixels) as u32;
+    // 计算区域内除箭头外的背景像素中深蓝色的比例
+    let blue_bg_ratio = if total_bg_pixels > 0 {
+        matched_blue_bg_pixels as f32 / total_bg_pixels as f32
+    } else {
+        0.0
+    };
+
+    // 只有当检测到足够数量的金色箭头像素（至少 200 个）且背景确实是深蓝色（比例大于 80%）时，才判定为检测到返回按钮
+    if matched_arrow_pixels > 200 && blue_bg_ratio > 0.80 {
+        let click_x = (sum_x / matched_arrow_pixels) as u32;
+        let click_y = (sum_y / matched_arrow_pixels) as u32;
         Some((click_x, click_y))
     } else {
         None
