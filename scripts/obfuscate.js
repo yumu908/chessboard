@@ -37,7 +37,7 @@ walkDir(distDir, (filePath) => {
                 stringArrayRotate: true,
                 stringArrayShuffle: true,
                 stringArrayThreshold: 0.75,
-                transformObjectKeys: true,
+                transformObjectKeys: false,
                 unicodeEscapeSequence: true,
                 renameGlobals: false // 关键选项：避免重命名全局变量破坏 Tauri 窗口通信 API
             });
