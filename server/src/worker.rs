@@ -249,7 +249,7 @@ impl AnalysisContext {
         }
     }
 
-    // 尝试检测并点击“再来一局”按钮
+    // 尝试检测并点击“再来一局”或段位提升返回按钮
     fn try_auto_match(&mut self, current_state: &mut ChessboardState) -> bool {
         let auto_match = SHARED_STATE.get().unwrap().config.read().unwrap().auto_match;
         if !auto_match {
@@ -264,6 +264,16 @@ impl AnalysisContext {
 
         if should_check {
             let image = self.window.capture_full();
+
+            // 1. 优先检测“段位提升”界面的返回箭头
+            if let Some((btn_x, btn_y)) = check_rank_up_back_btn(&image) {
+                info!("[自动匹配] 检测到段位提升返回箭头，执行自动点击！");
+                self.click_screen_pos(btn_x, btn_y);
+                self.last_auto_match_time = Some(now);
+                return true;
+            }
+
+            // 2. 然后检测“再来一局”按钮
             if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
                 info!("[自动匹配] 检测到“再来一局”按钮，执行自动点击！");
                 self.click_screen_pos(btn_x, btn_y);
@@ -383,7 +393,7 @@ impl AnalysisContext {
         }
     }
 
-    // 棋盘识别无效或被遮挡时，每隔 6 秒自动点击一次屏幕中心点，以驱散可能的干扰弹窗
+    // 棋盘识别无效或被遮挡时，每隔 6 秒自动点击一次屏幕x正中间、y三分之二处，以驱散可能的干扰弹窗
     fn handle_invalid_board_click(&mut self) {
         let now = std::time::Instant::now();
         let should_click = match self.last_invalid_click_time {
@@ -392,11 +402,11 @@ impl AnalysisContext {
         };
         if should_click {
             let (width, height) = self.window.full_size();
-            let center_x = width / 2;
-            let center_y = height / 2;
-            if center_x > 0 && center_y > 0 {
-                info!("[自愈点击] 棋盘识别无效/被遮挡，尝试点击屏幕中心以清除弹窗 ({}, {})", center_x, center_y);
-                self.click_screen_pos(center_x, center_y);
+            let click_x = width / 2;
+            let click_y = height * 2 / 3;
+            if click_x > 0 && click_y > 0 {
+                info!("[自愈点击] 棋盘识别无效/被遮挡，尝试点击屏幕中下部（x中间, y 2/3处）以清除弹窗 ({}, {})", click_x, click_y);
+                self.click_screen_pos(click_x, click_y);
                 self.last_invalid_click_time = Some(now);
             }
         }
@@ -487,6 +497,53 @@ pub fn check_play_again_btn(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<(u
     None
 }
 
+pub fn check_rank_up_back_btn(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Option<(u32, u32)> {
+    let width = image.width();
+    let height = image.height();
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    // 段位提升界面的返回箭头通常在左下角
+    // x 范围在 [0.02 * width, 0.15 * width]，y 范围在 [0.90 * height, 0.98 * height]
+    let x_start = (width as f32 * 0.02) as u32;
+    let x_end = (width as f32 * 0.15) as u32;
+    let y_start = (height as f32 * 0.90) as u32;
+    let y_end = (height as f32 * 0.98) as u32;
+
+    let mut matched_pixels = 0;
+    let mut sum_x = 0u64;
+    let mut sum_y = 0u64;
+
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            if x >= width || y >= height {
+                continue;
+            }
+            let pixel = image.get_pixel(x, y);
+            let r = pixel.0[0];
+            let g = pixel.0[1];
+            let b = pixel.0[2];
+
+            // 匹配金色返回箭头的颜色特征
+            if r > 115 && g > 105 && r > g.saturating_sub(10) && r > b.saturating_sub(15) && b < r.saturating_add(15) {
+                matched_pixels += 1;
+                sum_x += x as u64;
+                sum_y += y as u64;
+            }
+        }
+    }
+
+    // 如果匹配的金色像素数量足够（例如至少 200 个），则判定为检测到返回按钮
+    if matched_pixels > 200 {
+        let click_x = (sum_x / matched_pixels) as u32;
+        let click_y = (sum_y / matched_pixels) as u32;
+        Some((click_x, click_y))
+    } else {
+        None
+    }
+}
+
 pub fn analyse(app: &AppHandle, mut result: QueryResult, board: [[char; 9]; 10]) -> (chess::Changed, [[char; 9]; 10]) {
     // 引擎结果翻译为中文
     let best_pv = result.pvs.first().unwrap();
@@ -546,6 +603,16 @@ fn process_analysis_loop(mut context: AnalysisContext) {
 
             if should_check && is_idle_or_initial {
                 let image = context.window.capture_full();
+                
+                // 1. 优先检测并点击段位提升返回箭头
+                if let Some((btn_x, btn_y)) = check_rank_up_back_btn(&image) {
+                    info!("[自动匹配] 例行检测中发现段位提升返回箭头，执行自动点击！");
+                    context.click_screen_pos(btn_x, btn_y);
+                    context.last_auto_match_time = Some(now);
+                    continue;
+                }
+
+                // 2. 然后检测并点击“再来一局”按钮
                 if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
                     info!("[自动匹配] 例行检测中发现“再来一局”按钮，执行自动点击！");
                     context.click_screen_pos(btn_x, btn_y);
@@ -627,6 +694,18 @@ fn process_analysis_loop(mut context: AnalysisContext) {
                     let auto_match = SHARED_STATE.get().unwrap().config.read().unwrap().auto_match;
                     if auto_match {
                         let image = context.window.capture_full();
+                        
+                        // 1. 优先检测并点击段位提升返回箭头
+                        if let Some((btn_x, btn_y)) = check_rank_up_back_btn(&image) {
+                            info!("[自动下棋重试] 棋子未移动，但检测到段位提升返回箭头，停止重发着法，执行返回点击！");
+                            context.click_screen_pos(btn_x, btn_y);
+                            context.last_auto_match_time = Some(std::time::Instant::now());
+                            context.has_pending_click = false;
+                            context.last_action_time = None;
+                            continue;
+                        }
+
+                        // 2. 然后检测并点击“再来一局”按钮
                         if let Some((btn_x, btn_y)) = check_play_again_btn(&image) {
                             info!("[自动下棋重试] 棋子未移动，但检测到“再来一局”按钮，停止重发着法，执行匹配点击！");
                             context.click_screen_pos(btn_x, btn_y);

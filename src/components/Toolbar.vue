@@ -312,7 +312,7 @@ async function toggleEngine() {
                             <n-button
                                 circle
                                 size="small"
-                                :type="autoplay ? 'warning' : 'default'"
+                                :type="autoplay ? 'warning' : 'tertiary'"
                                 @click="toggleAutoplay"
                             >
                                 自
@@ -326,7 +326,7 @@ async function toggleEngine() {
                             <n-button
                                 circle
                                 size="small"
-                                :type="automatch ? 'success' : 'default'"
+                                :type="automatch ? 'success' : 'tertiary'"
                                 @click="toggleAutomatch"
                             >
                                 连
